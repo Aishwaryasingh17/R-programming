@@ -1,0 +1,590 @@
+**IDS 572 - Assignment 3**
+**Aishwarya Manjunath Singh**
+**Sahana Prabakaran**
+
+```{r}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(zoo)
+library(PRROC)
+library(MLmetrics)
+library(readxl)
+library(lubridate)
+library(psych)
+library("ggpubr")
+library(tibble)
+library(janitor)
+library(caTools)
+```
+
+```{r}
+
+#Importing data
+library(readxl)
+travel_data <- read_excel("Docs_for_Ass3/Scholastic_Travel.xlsx",sheet=2)
+```
+
+```{r}
+#Creating a data frame by identifying the RESPONSE variable as our Target
+travel_data<-travel_data%>%
+  mutate(Target = as.factor(ifelse(Retained.in.2012.==1,"Yes","No")))
+```
+
+```{r}
+#Setting RESPONSE variable as Null
+travel_data$Retained.in.2012. <- NULL
+```
+
+```{r}
+#Calculating the proportion of Yes and No (NOT HAPPENING)
+Yes_data <- travel_data%>%
+  dplyr::filter(Target=="Yes")
+No_data <- travel_data%>%
+  dplyr::filter(Target=="No")
+
+proportion_data <-nrow(Yes_data)/nrow(No_data)
+proportion_data
+```
+
+**EDA**
+```{r}
+#Removing unwanted columns
+travel_data$ID <- NULL
+travel_data$Early.RPL <- NULL
+travel_data$Latest.RPL <- NULL
+travel_data$Initial.System.Date <- NULL
+travel_data$FirstMeeting <- NULL
+travel_data$LastMeeting <- NULL
+travel_data
+```
+
+```{r}
+#Converting into factors and numeric:
+travel_data<-travel_data%>%
+  mutate(Travel.Type=as.factor(Travel.Type),SchoolSizeIndicator = as.factor((SchoolSizeIndicator)),
+         Is.Non.Annual.=as.factor(Is.Non.Annual.),Parent.Meeting.Flag=as.factor(Parent.Meeting.Flag),
+         Special.Pay= as.factor(Special.Pay),CRM.Segment= as.factor(CRM.Segment),
+         Income.Level= as.factor(Income.Level),SingleGradeTripFlag=as.factor(SingleGradeTripFlag))
+
+travel_data<-travel_data%>%
+  mutate(CRM.Segment = as.numeric(CRM.Segment),DifferenceTraveltoFirstMeeting=as.numeric(DifferenceTraveltoFirstMeeting),
+         DifferenceTraveltoLastMeeting = as.numeric(DifferenceTraveltoLastMeeting), FPP.to.School.enrollment = as.numeric(FPP.to.School.enrollment))
+
+travel_data<-travel_data%>%
+  mutate(MDR.High.Grade=as.numeric(MDR.High.Grade))
+
+
+
+travel_data$MDR.High.Grade[travel_data$MDR.High.Grade=="NA"]<- NA
+```
+
+```{r}
+#Handling null values by replacing it with mean and mode
+travel_data<- travel_data%>%mutate(To.Grade = as.numeric(To.Grade),To.Grade=as.numeric(To.Grade))
+travel_data<-travel_data %>% mutate(From.Grade=ifelse(is.na(From.Grade),mean(travel_data$From.Grade,na.rm=T),From.Grade))
+travel_data<-travel_data %>% mutate(To.Grade=ifelse(is.na(To.Grade),mean(travel_data$To.Grade,na.rm=T),To.Grade))
+travel_data<-travel_data %>% mutate(Total.School.Enrollment=ifelse(is.na(Total.School.Enrollment),mean(travel_data$Total.School.Enrollment,na.rm=T),Total.School.Enrollment))
+travel_data<-travel_data %>% mutate(DifferenceTraveltoFirstMeeting=ifelse(is.na(DifferenceTraveltoFirstMeeting),mean(travel_data$DifferenceTraveltoFirstMeeting,na.rm=T),DifferenceTraveltoFirstMeeting))
+travel_data<-travel_data %>% mutate(DifferenceTraveltoLastMeeting=ifelse(is.na(DifferenceTraveltoLastMeeting),mean(travel_data$DifferenceTraveltoLastMeeting,na.rm=T),DifferenceTraveltoLastMeeting))
+travel_data<-travel_data %>% mutate(FPP.to.School.enrollment=ifelse(is.na(FPP.to.School.enrollment),mean(travel_data$FPP.to.School.enrollment,na.rm=T),FPP.to.School.enrollment))
+travel_data<-travel_data %>% mutate(MDR.High.Grade=ifelse(is.na(MDR.High.Grade),mean(travel_data$MDR.High.Grade,na.rm=T),MDR.High.Grade))
+getmode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+travel_data <- travel_data %>% 
+  mutate(Poverty.Code = if_else(is.na(Poverty.Code), 
+                                getmode(Poverty.Code), 
+                                Poverty.Code))
+travel_data <- travel_data%>%
+  mutate(MDR.Low.Grade = if_else(is.na(MDR.Low.Grade), 
+                                 getmode(MDR.Low.Grade), 
+                                 MDR.Low.Grade))
+
+travel_data <- travel_data%>%
+  mutate(MDR.High.Grade = if_else(is.na(MDR.High.Grade), 
+                                  getmode(MDR.High.Grade), 
+                                  MDR.High.Grade))
+travel_data <- travel_data%>%
+  mutate(Income.Level = if_else(is.na(Income.Level), 
+                                getmode(Income.Level), 
+                                Income.Level))
+
+travel_data <- travel_data%>%
+  mutate(SchoolSizeIndicator = if_else(is.na(SchoolSizeIndicator), 
+                                       getmode(SchoolSizeIndicator), 
+                                       SchoolSizeIndicator))
+
+travel_data <- head(travel_data, - 3)   
+
+travel_data$Special.Pay<-NULL
+
+```
+
+**Finding out OUTLIERS**
+```{r}
+#EZ.Pay.Take.Up.Rate (48 Outliers)
+boxplot(travel_data$EZ.Pay.Take.Up.Rate)
+boxplot(travel_data$EZ.Pay.Take.Up.Rate,plot = FALSE)$out
+```
+
+```{r}
+#FPP.to.School.enrollment (128 Outliers)
+boxplot(travel_data$FPP.to.School.enrollment)
+boxplot(travel_data$FPP.to.School.enrollment,plot = FALSE)$out
+```
+
+```{r}
+#FPP.to.PAX (126 Outliers)
+boxplot(travel_data$FPP.to.PAX)
+boxplot(travel_data$FPP.to.PAX,plot = FALSE)$out
+```
+
+```{r}
+#SPR.Group.Revenue (12 Outliers)
+boxplot(travel_data$SPR.Group.Revenue)
+boxplot(travel_data$SPR.Group.Revenue,plot = FALSE)$out
+```
+
+```{r}
+#Tuition (16 Outliers)
+boxplot(travel_data$Tuition)
+boxplot(travel_data$Tuition,plot = FALSE)$out
+```
+
+```{r}
+#FRP.Active (108 Outliers)
+boxplot(travel_data$FRP.Active)
+boxplot(travel_data$FRP.Active,plot = FALSE)$out
+```
+
+```{r}
+#FRP.Cancelled (200 Outliers)
+boxplot(travel_data$FRP.Cancelled)
+boxplot(travel_data$FRP.Cancelled,plot = FALSE)$out
+```
+
+```{r}
+#Total.School.Enrollement (68 Outliers)
+boxplot(travel_data$Total.School.Enrollment)
+boxplot(travel_data$Total.School.Enrollment,plot = FALSE)$out
+```
+
+```{r}
+#Summary of the dataset
+dim(travel_data)
+describe(travel_data)
+```
+
+```{r}
+#Correlation between the numeric variables
+col1<-travel_data[,46]
+col2<-travel_data[,47]
+cor(col1,col2)
+m1<-t.test(travel_data$FPP.to.PAX,travel_data$FPP.to.School.enrollment, data=travel_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+```
+
+```{r}
+#Tuition Mean & SD
+mean(travel_data$Tuition, na.rm = TRUE)                
+sd(travel_data$Tuition, na.rm = TRUE)
+Tuition.mean <- travel_data %>% 
+  select(Tuition, Target) %>%
+  group_by(Target) %>% 
+  summarise(mean = mean(Tuition))
+Tuition.mean
+```
+
+```{r}
+#FRP.Active Mean & SD
+mean(travel_data$FRP.Active, na.rm = TRUE)                
+sd(travel_data$FRP.Active, na.rm = TRUE)   
+FRP.Active.mean <- travel_data %>%
+  select(FRP.Active,Target) %>% 
+  group_by(Target) %>% 
+  summarise(mean = mean(FRP.Active))
+FRP.Active.mean
+```
+
+```{r}
+#FRP.Cancelled Mean & SD
+mean(travel_data$FRP.Cancelled,na.rm = TRUE)                
+sd(travel_data$FRP.Cancelled, na.rm = TRUE)   
+FRP.Cancelled.mean <- travel_data %>%
+  select(FRP.Cancelled,Target) %>% 
+  group_by(Target) %>% 
+  summarise(mean = mean(FRP.Cancelled))
+FRP.Cancelled.mean
+```
+
+```{r}
+#Total.School.Enrollment Mean & SD
+mean(travel_data$Total.School.Enrollment,na.rm = TRUE)                
+sd(travel_data$Total.School.Enrollment, na.rm = TRUE)   
+```
+
+**PLOTS**
+```{r}
+#School Size
+ggplot(travel_data,aes(factor(SchoolSizeIndicator), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=SchoolSizeIndicator),position = "dodge") + xlab("School Size")
+
+ggplot(travel_data,aes(factor(Program.Code), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=Program.Code),position = "dodge") + xlab("Places visited during trip")+
+  ylab("No of times the place was visisted")
+
+
+ggplot(travel_data,aes(factor(Travel.Type))) + 
+  geom_bar(aes(fill=Travel.Type),position = "dodge") + xlab("Mode of Transportation")
+
+ggplot(travel_data,aes(factor(Region), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=School.Type),position = "dodge") + xlab("School Size")
+```
+
+**Decision Tree**
+```{r}
+#Partitioning the data into 50% Train and 50% Test 
+set.seed(1236)
+idx <- sample(2,nrow(travel_data), replace = TRUE, prob = c(0.5,0.5))
+train1 <-travel_data[idx==1,]
+test1<- travel_data[idx==2,]
+
+formula<-Target~.
+```
+
+```{r}
+#CART
+mytree<-rpart(formula,data=train1, parms = list(split="gini"),
+              control=rpart.control(minsplit = 10,minbucket = 20,cp=-1))
+print(mytree)
+rpart.plot(mytree)
+```
+
+```{r}
+##Error rate of predicted training and test data compared with true value##
+pred_train1 = predict(mytree, data_train=train1, type= "class")
+mean(train1$Target!=pred_train1, na.rm = TRUE)    #0.1447261
+
+pred_test1 = predict(mytree, data_test=test1, type= "class")
+mean(test1$Target!=pred_test1,na.rm = TRUE)       #0.4578904
+```
+
+```{r}
+#C5
+mytree_c5<-rpart(formula,data=train1, parms = list(split="information gain"),
+              control=rpart.control(minsplit = 15,minbucket = 15,cp=-1))
+print(mytree_c5)
+rpart.plot(mytree_c5)
+```
+
+```{r}
+##Error rate of predicted Training and Test data compared with true value##
+pred_train1_c5 = predict(mytree_c5, data_train=train1, type= "class")
+mean(train1$Target!=pred_train1_c5, na.rm = TRUE)     #0.1349141
+
+pred_test1_c5 = predict(mytree_c5, data_test=test1, type= "class")
+mean(test1$Target!=pred_test1_c5,na.rm = TRUE)        #0.4562551
+```
+
+```{r}
+#Accuracy of model before pruning Train data
+prop.table(table(train1$Target))
+matrix1 <- table(train1$Target, pred_train1_c5)
+matrix1
+accuracy_Train <- sum(diag(matrix1)) / sum(matrix1)
+accuracy_Train               #0.8650859
+```
+
+```{r}
+#Accuracy of model after pruning Train data
+control <- rpart.control(minsplit = 10,
+                         minbucket = 5,
+                         maxdepth = 15,
+                         cp = -1)
+accuracy_tune <- function(fit) {
+  pred_train1 <- predict(fit, train1, type = 'class')
+  matrix1 <- table(train1$Target, pred_train1)
+  accuracy_Train <- sum(diag(matrix1)) / sum(matrix1)
+  accuracy_Train
+}
+tune_fit <- rpart(Target~., train1, method = 'class', control = control)
+accuracy_tune(tune_fit)      #0.9272281
+```
+
+```{r}
+#Partitioning the data into 70% Train and 30% Test 
+idx2 <- sample(2,nrow(travel_data), replace = TRUE, prob = c(0.7,0.3))
+train2 <-travel_data[idx2==1,]
+test2<- travel_data[idx2==2,]
+
+formula1<-Target~.     
+```
+
+```{r}
+#CART
+mytree1_70<-rpart(formula1,data=train2, parms = list(split="gini"),
+               control=rpart.control(minsplit =15,minbucket = 20,cp=-1,maxdepth = 10))
+print(mytree1_70)
+rpart.plot(mytree1_70)
+```
+
+```{r}
+##Error rate of predicted Training and Test data compared with true value##
+pred_train2 = predict(mytree1_70, data_train1=train2, type= "class")
+mean(train2$Target!=pred_train2,na.rm = TRUE)    #0.154921
+
+
+pred_test2 = predict(mytree1_70, data_test1=test2, type= "class")
+mean(test2$Target!=pred_test2,na.rm = TRUE)      #0.4872418
+```
+
+```{r}
+#C5
+mytree7_c5<-rpart(formula,data=train2, parms = list(split="information gain"),
+               control=rpart.control(minsplit = 10,minbucket = 20,cp=-5,maxdepth = 5))
+print(mytree7_c5)
+rpart.plot(mytree7_c5)
+```
+
+```{r}
+##Error rate of predicted Training and Test data compared with true value##
+pred_train2_70 = predict(mytree7_c5, data_train1=train2, type= "class")
+mean(train2$Target!=pred_train2_70,na.rm = TRUE)   #0.1707169
+
+pred_test2_70 = predict(mytree1_70, data_test1=test2, type= "class")
+mean(test2$Target!=pred_test2_70,na.rm = TRUE)     #0.4793439
+```
+
+```{r}
+#Accuracy of model before pruning Train data
+prop.table(table(train2$Target))
+matrix2 <- table(train2$Target,pred_train2_70)
+matrix2
+accuracy_Train_o_70 <- sum(diag(matrix2)) / sum(matrix2)
+accuracy_Train_o_70                 #0.8876063
+```
+
+```{r}
+#Accuracy of model after pruning Train data
+control <- rpart.control(minsplit = 10,
+                         minbucket =5,
+                         maxdepth = 15,
+                         cp = -1)
+accuracy_tune <- function(fit) {
+  pred_train2 <- predict(fit, train2, type = 'class')
+  matrix2 <- table(train2$Target, pred_train2)
+  accuracy_Train_70 <- sum(diag(matrix2)) / sum(matrix2)
+  accuracy_Train_70
+}
+tune_fit_train_70 <- rpart(Target~., train2, method = 'class', control = control)
+accuracy_tune(tune_fit_train_70)    #0.927096
+```
+
+**Random Forest**
+```{r}
+library(randomForest)
+library(caret)
+library(ROCR)
+
+travel_random <- travel_data
+
+ntree <-100
+RF <- randomForest(Target~., data=travel_random,ntree= 100, mtry=sqrt(ncol(travel_random)-1),proximity =T,importance= T)
+print(RF)
+
+RF$importance
+importance(RF, type=1)
+importance(RF, type=2)
+varImpPlot(RF)
+```
+
+```{r}
+#To calculate OOB
+RF$err.rate[,1]
+RF$err.rate[ntree,1]
+```
+
+```{r}
+#Confusion Matrix
+CM<-table(RF$predicted,travel_random$Target,dnn = c("predicted","Actual"))
+
+confusionMatrix(RF$predicted,travel_random$Target)
+
+pred<-prediction(RF$votes[,2], travel_random$Target)
+```
+
+```{r}
+#Gain chart
+perf<- performance(pred,"tpr","rpp")
+plot(perf)
+plot(perf, colorize = TRUE)
+```
+
+```{r}
+#Response chart
+perf<- performance(pred,"ppv","rpp")
+plot(perf)
+plot(perf, colorize = TRUE)
+```
+
+```{r}
+#Lift
+perf<- performance(pred,"lift","rpp")
+plot(perf)
+plot(perf, colorize = TRUE)
+```
+
+```{r}
+#ROC Curve
+perf<- performance(pred,"tpr","fpr")
+plot(perf)
+plot(perf, colorize = TRUE)
+```
+
+```{r}
+#AUC
+auc_var<- performance(pred,"auc")
+auc_var<-unlist(slot(auc_var,"y.values"))
+auc_var
+```
+
+```{r}
+#Error for random forest
+indx <- sample(2, nrow(travel_random),replace =T, prob= c(0.7,03))
+Train <- travel_random[indx==1,]
+Validation <- travel_random[indx==2,]
+
+pred_err <- c()
+
+for(i in seq(1, ncol(travel_random)-1))
+{
+  Rf<-randomForest(Target~., data=Train, ntree=100,mtry=i)
+  pred1 <- predict(Rf, new_data = Validation, type= "class")
+  pred_err <- c(pred_err,mean(pred1!=Validation$Target))
+}
+pred_err
+```
+
+```{r}
+#Index that gives minimum error:
+min_mtry<- which.min(pred_err)
+min_mtry
+```
+
+**Logistic Regression**
+```{r}
+
+travel_log <- travel_data
+
+#Splitting the data set
+split_data <- sample.split(travel_log, SplitRatio = 0.8)
+split_data
+
+colnames(travel_log)[49]<-"Response"
+
+set.seed(1234)
+ind <- sample(2, nrow(travel_log), replace = T, prob = c(0.8, 0.2))
+train_log <- travel_log[ind==1,]
+test_log <- travel_log[ind==2,]
+logistic_model <- glm(Response~., data = train_log, family = 'binomial')
+
+
+```
+
+```{r}
+#Precision-Recall Curve:
+logit_train<- predict(logistic_model, data=train_log,type="response")
+logit_test<- predict(logistic_model, data=test_log,type="response")
+P1= logit_train[train_log$Response=="Yes"]
+P2= logit_train[train_log$Response=="No"]
+P<-pr.curve(P1,P2,curve = TRUE)
+P
+plot(P, main="Precision-Recall curve")
+```
+
+```{r}
+#Out-of-sample prediction: 
+P1_test= logit_test[test_log$Response=="Yes"]
+P2_test= logit_test[test_log$Response=="No"]
+roc_test= roc.curve(P1_test, P2_test, curve = T)
+roc_test$auc
+pr_test <- pr.curve(P1_test, P2_test, curve = TRUE)
+pr_test
+plot(pr_test, main="Out-of-sample PR curve")
+```
+
+
+```{r}
+#Plots
+hist(predict(logistic_model))
+pred_resp <- predict(logistic_model,type="response")
+hist(pred_resp)
+```
+
+**Cross Validation**
+````{r}
+travel_cv<-travel_data
+colnames(travel_cv)[49]<-"Resp"
+travel_cv <- travel_cv[sample(nrow(travel_cv)),]
+```
+
+```{r}
+#CV for Logistic Model
+
+k<-10
+nmethod <-1
+folds <- cut(seq(1,nrow(travel_cv)),breaks = k,labels = FALSE)
+model_error <- matrix(-1,k,nmethod,dimnames = list(paste0("Fold",1:k),c("LogisticRegression")))
+
+for(i in 1:k)
+{
+  testindexes <- which(folds == i, arr.ind = TRUE)
+  test <- travel_cv[testindexes, ]
+  train <- travel_cv[-testindexes, ]
+  
+  LogisticModel <- glm(Resp~., data=train, family = "binomial")
+  pred <- predict(LogisticModel, new_data=test, type = "response",se.fit=FALSE)
+  pred_class <- as.factor(ifelse(pred >= 0.5, "Yes", "No"))
+  model_error[i] <- mean(test$Resp!=pred_class) #error_rate
+}
+model_error
+levels(pred_class)==levels(test$Resp)
+mean(model_error)
+#print(LogisticModel)
+
+```
+
+```{r}
+#CV for Decision Tree
+
+model_error_dt <- matrix(-1,k,nmethod,dimnames = list(paste0("Fold",1:k),c("Decision Tree")))
+
+for(i in 1:k)
+{
+  testindexes1 <- which(folds == i, arr.ind = TRUE)
+  test1 <- travel_cv[testindexes1, ]
+  train1 <- travel_cv[-testindexes1, ]
+  
+  DTmodel <- rpart(Resp~., data=train1,method = 'class', control = control)
+  pred_1 <- predict(DTmodel, new_data=test1, type = "class")
+  model_error_dt[i] <- mean(test1$Resp!=pred_1) #error_rate
+}
+model_error_dt
+levels(pred_1)==levels(test1$Resp)
+mean(model_error)
+#print(DTmodel)
+
+#Plotting the Decision Tree model 
+plot(DTmodel)
+```
+
+
+
+
