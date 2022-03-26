@@ -1,6 +1,3 @@
-**IDS 572 - Assignment 3**
-**Aishwarya Manjunath Singh**
-**Sahana Prabakaran**
 
 ```{r}
 library(readr)
