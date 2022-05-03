@@ -1,0 +1,1205 @@
+**IDS 572 - Assignment 5**
+**Aishwarya Manjunath Singh**
+**Sahana Prabakaran**
+
+```{r}
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(rpart)
+library(ISLR)
+library(hexbin)
+library(rpart.plot)
+library(zoo)
+library(ROSE)
+library(sf)
+library(lessR)
+library(PRROC)
+library(ROCR)
+library(MLmetrics)
+library(lubridate)
+library(psych)
+library(ggpubr)
+library(tibble)
+library(janitor)
+library(caTools)
+library(scales)
+library(randomForest)
+library(caret)
+library(nnet)
+library(NeuralNetTools)
+library(plyr)
+library(factoextra)
+library(ggfortify)
+library(cluster)
+library(gridExtra)
+library(dendextend)
+library(arules)
+library(arulesViz)
+library(splitstackshape)
+library(reshape2)
+library(normalr)
+library(caret)
+library(maps)
+library(rworldmap)
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+#Importing data
+library(readxl)
+champo_data<- read_excel("Champo_Carpets.xlsx",sheet=2)
+```
+
+```{r}
+#EDA for "Raw Data"
+
+#Converting into factors and numeric:
+champo_data<-champo_data%>%
+  mutate(CustomerCode=as.factor(CustomerCode),CountryName = as.factor(CountryName),UnitName=as.factor(UnitName),
+         ITEM_NAME = as.factor(ITEM_NAME), QualityName=as.factor(QualityName),DesignName=as.factor(DesignName),
+         ColorName = as.factor(ColorName), ShapeName= as.factor(ShapeName))
+
+champo_data<-champo_data%>%
+  mutate(OrderType = as.numeric(ifelse(OrderType=="Area Wise","1","0")))
+
+champo_data<-champo_data%>%
+  mutate(OrderCategory = as.numeric(ifelse(OrderCategory=="Order","1","0")))
+
+typeof(champo_data$OrderType)
+
+#Checking for null values
+cbind(
+  lapply(
+    lapply(champo_data, is.na)
+    , sum)
+)
+```
+
+```{r}
+#Finding out OUTLIERS
+boxplot(champo_data$CustomerCode)
+
+boxplot(champo_data$UnitName)
+
+boxplot(champo_data$QtyRequired)
+
+boxplot(champo_data$TotalArea)
+
+boxplot(champo_data$AreaFt)
+```
+
+```{r}
+#Correlation between the numeric variables
+
+#Correlation between Total Area and Area per square ft
+col1<-champo_data[,9]
+col2<-champo_data[,16]
+cor(col1,col2)
+#Correlation between Total Area and Area per square ft is 0.8442472, which indicates that the two variables are highly correlated
+m1<-t.test(champo_data$TotalArea,champo_data$AreaFt, data=champo_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+
+#Correlation between Quantity required and Amount
+col3<-champo_data[,8]
+col4<-champo_data[,10]
+cor(col3,col4)
+#Correlation between Quantity required and Amount is 0.1168129, which indicates that the linear relationship is weak
+m1<-t.test(champo_data$QtyRequired,champo_data$Amount, data=champo_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+
+#Correlation between Quantity required and AreaFt
+col5<-champo_data[,8]
+col6<-champo_data[,16]
+cor(col5,col6)
+#Correlation between Quantity required and AreaFt is -0.07684352, there is a negative correlation which indicates there is an inverse correlation between the two variables
+m1<-t.test(champo_data$QtyRequired,champo_data$AreaFt, data=champo_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+```
+
+```{r}
+#Total Area Mean & SD
+mean(champo_data$TotalArea, na.rm = TRUE)      #36.15121              
+sd(champo_data$TotalArea, na.rm = TRUE)        #45.17166
+
+
+#Area per square ft Mean & SD
+mean(champo_data$AreaFt, na.rm = TRUE)         #44.46952            
+sd(champo_data$AreaFt, na.rm = TRUE)           #45.20951
+
+
+#Amount Mean & SD
+mean(champo_data$Amount, na.rm = TRUE)         #1657.6            
+sd(champo_data$Amount, na.rm = TRUE)           #14054.93
+
+
+#Quantity required Mean & SD
+mean(champo_data$QtyRequired, na.rm = TRUE)    #31.41567            
+sd(champo_data$QtyRequired, na.rm = TRUE)      #191.4499
+```
+
+```{r}
+#PLOTS
+
+#Plot for Country name
+ggplot(champo_data,aes(factor(CountryName), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=CountryName),position = "dodge") + xlab("Country  Names") +theme(axis.text.x = element_blank())
+
+#Plot for Order type based on Countries 
+ggplot(champo_data,aes(factor(OrderType), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=CountryName),position = "dodge") + xlab("Order Type")+scale_x_discrete("order type",labels = c("1"="Area Wise","0"="PC Wise"))
+
+#Plot for Order Category based on Countries 
+ggplot(champo_data,aes(factor(OrderCategory), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=CountryName),position = "dodge") + xlab("Order Category")+scale_x_discrete("Order Category",labels = c("1"="Order","0"="Sample"))
+
+#Plot for different types of items and their respective counts
+ggplot(champo_data,aes(factor(ITEM_NAME), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=ITEM_NAME),position = "dodge") + xlab("ITEMS")+theme(axis.text.x = element_blank())+labs(title="Different Items")+coord_flip()
+
+ggplot(champo_data,aes(factor(ITEM_NAME), na.rm= TRUE, ..count..)) + 
+  geom_bar(aes(fill=QtyRequired),position = "dodge") + xlab("ITEMS")
+
+
+ggplot() +
+  geom_bar(data = champo_data, aes(ITEM_NAME, QtyRequired), stat = "identity", alpha = 0.5,fill="blue")+scale_y_continuous(label = comma)
+#Highest number of carpets sold is type of "DURRY" and the second highest is "HAND TUFTED"
+
+
+ggplot(champo_data) +
+  geom_point(aes(x = OrderType, y= QtyRequired))
+
+
+ggplot(champo_data) +
+  geom_point(aes(x = QtyRequired, y=AreaFt, color = OrderType))
+
+ggplot(champo_data, aes(x=Custorderdate, y=OrderCategory))+geom_bar(aes(fill=OrderCategory),stat='identity')+scale_fill_gradient(labels = c("0"="Order","1"="Sample"), breaks =c(0,1))
+
+#Histogram
+hist(champo_data$AreaFt)
+
+#Scatter plot for Quantity required and Amount
+ggplot(champo_data, aes(x=QtyRequired, y=Amount))+
+  geom_point() + ylim(0, 50000) +xlim(0,1000)+stat_smooth(method="lm")
+
+ggplot(champo_data,aes(x=CustomerCode,y=Amount),stat = "identity")+
+  geom_col()
+
+#Density graph for Order type and Order category
+ggplot(champo_data, aes(OrderType)) +
+  geom_density()
+
+ggplot(champo_data, aes(OrderCategory)) +
+  geom_density()
+
+#Maps
+n <- joinCountryData2Map(champo_data, joinCode="NAME", nameJoinColumn="CountryName")
+mapCountryData(n, nameColumnToPlot="Amount", mapTitle="world map",colourPalette="terrain")
+
+#Pie chart
+PieChart(ITEM_NAME, hole = 0, values = "%", data = champo_data,
+         fill = c("pink","orange","blue","red","purple","brown","lightblue"), main = "")
+
+```
+
+```{r}
+#EDA for "Order only" data
+
+champo_order_data<- read_excel("Champo_Carpets.xlsx",sheet=3)
+
+champo_order_data<-champo_order_data%>%
+  mutate(CustomerCode=as.factor(CustomerCode),CountryName = as.factor(CountryName),
+         ITEM_NAME = as.factor(ITEM_NAME), QualityName=as.factor(QualityName),DesignName=as.factor(DesignName),
+         ColorName = as.factor(ColorName), ShapeName= as.factor(ShapeName))
+
+
+#Checking for null values
+cbind(
+  lapply(
+    lapply(champo_order_data, is.na)
+    , sum)
+)
+```
+
+```{r}
+#Finding out OUTLIERS
+boxplot(champo_order_data$CustomerCode)
+
+boxplot(champo_order_data$QtyRequired)
+
+boxplot(champo_order_data$TotalArea)
+
+boxplot(champo_order_data$AreaFt)
+
+boxplot(champo_order_data$AreaMtr)
+
+```
+
+```{r}
+#Correlation between the numeric variables
+#Correlation between Total Area and Areaft
+col_1<-champo_order_data[,4]
+col_2<-champo_order_data[,11]
+cor(col_1,col_2)
+#Correlation between Total Area and Area per square ft is 0.8286136, which indicates that the two variables are highly correlated
+m2<-t.test(champo_order_data$TotalArea,champo_order_data$AreaFt, data=champo_order_data, var.equal=FALSE, na.rm=TRUE)
+print(m2)
+
+#Correlation between Total Area and AreaMtr
+col_3<-champo_order_data[,4]
+col_4<-champo_order_data[,12]
+cor(col_3,col_4)
+#Correlation between Total Area required and AreaMtr is 0.8213057, which indicates that the linear relationship is strong and they are highly correlated
+m2<-t.test(champo_order_data$TotalArea,champo_order_data$AreaMtr, data=champo_order_data, var.equal=FALSE, na.rm=TRUE)
+print(m2)
+
+#Correlation between  AreaFt and AreaMtr
+col_5<-champo_order_data[,11]
+col_6<-champo_order_data[,12]
+cor(col_5,col_6)
+#Correlation between AreaFt and AreaMtr is 0.9997953, it is almost close to 1 and indicates that AreaFt and AreMtr are highly correlated
+m2<-t.test(champo_order_data$AreaFt,champo_order_data$AreaMtr, data=champo_order_data, var.equal=FALSE, na.rm=TRUE)
+print(m2)
+
+#Correlation between Total Area and QtyRequired
+col_7<-champo_order_data[,3]
+col_8<-champo_order_data[,4]
+cor(col_7,col_8)
+#Correlation between Total Area and Quantity required is -0.09614183, there is a negative correlation which indicates there is an inverse correlation between the two variables
+m2<-t.test(champo_order_data$TotalArea,champo_order_data$QtyRequired, data=champo_order_data, var.equal=FALSE, na.rm=TRUE)
+print(m2)
+
+#Correlation between QtyRequired and Amount
+col_9<-champo_order_data[,3]
+col_10<-champo_order_data[,5]
+cor(col_9,col_10)
+#Correlation between Quantity required and Amount is 0.1097048, which indicates that the liner correlation is weak
+```
+
+```{r}
+#Total Area Mean & SD
+mean(champo_order_data$TotalArea, na.rm = TRUE)     #44.73137               
+sd(champo_order_data$TotalArea, na.rm = TRUE)       #50.0996
+
+
+#Area per square ft Mean & SD
+mean(champo_order_data$AreaFt, na.rm = TRUE)        #54.62237            
+sd(champo_order_data$AreaFt, na.rm = TRUE)          #49.07277
+
+
+#AreaMtr Mean & SD
+mean(champo_order_data$AreaMtr, na.rm = TRUE)       #4.95174          
+sd(champo_order_data$AreaMtr, na.rm = TRUE)         #4.455933
+
+
+#Amount Mean & SD
+mean(champo_order_data$Amount, na.rm = TRUE)        #2392.04           
+sd(champo_order_data$Amount, na.rm = TRUE)          #16832.09
+
+#Quantity required Mean & SD
+mean(champo_order_data$QtyRequired, na.rm = TRUE)   #44.4606           
+sd(champo_order_data$QtyRequired, na.rm = TRUE)     #228.7495
+```
+
+```{r}
+#PLOTS
+PieChart(CountryName, hole = 0, values = "%", data = champo_order_data,
+         fill = c("pink","orange","blue","red","purple","brown","lightblue"), main = "")
+#We can see that USA has the maximum order category  as "Order" 
+```
+
+```{r}
+#EDA for "Sample only" data
+
+champo_sample_data<- read_excel("Champo_Carpets.xlsx",sheet=4)
+
+#Converting into factors and numeric:
+names(champo_sample_data)[25] <- 'OrderConversion'
+names(champo_sample_data)[12] <- 'Hand_Tufted'
+names(champo_sample_data)[14] <- 'Double_back'
+names(champo_sample_data)[15] <- 'Hand_Woven'
+
+#Removing dummy variables for Country Name and Item Name
+champo_sample_data$USA <- NULL
+champo_sample_data$UK <- NULL
+champo_sample_data$Italy <- NULL
+champo_sample_data$Belgium <- NULL
+champo_sample_data$Romania <- NULL
+champo_sample_data$Australia <- NULL
+champo_sample_data$India <- NULL
+champo_sample_data$Hand_Tufted <- NULL
+champo_sample_data$Durry <- NULL
+champo_sample_data$Double_Back <- NULL
+champo_sample_data$Hand_Woven<- NULL
+champo_sample_data$Knotted <- NULL
+champo_sample_data$Jacquard <- NULL
+champo_sample_data$Handloom <- NULL
+champo_sample_data$Other <- NULL
+
+
+champo_sample_data<-champo_sample_data%>%
+  mutate(CustomerCode=as.factor(CustomerCode), OrderConversion= as.factor(OrderConversion),
+         ITEM_NAME = as.factor(ITEM_NAME),ShapeName= as.factor(ShapeName),
+         CountryName = as.factor(CountryName))
+
+#Checking for null values
+cbind(
+  lapply(
+    lapply(champo_sample_data, is.na)
+    , sum)
+)
+```
+
+```{r}
+#Finding out OUTLIERS
+boxplot(champo_sample_data$QtyRequired)
+
+boxplot(champo_sample_data$AreaFt)
+
+boxplot(champo_sample_data$REC)
+```
+
+```{r}
+#Correlation between Quantity required and Area per square ft
+coll1<-champo_sample_data[,3]
+coll2<-champo_sample_data[,10]
+cor(coll1,coll2) 
+#Correlation between Quantity required and Area per square ft is -0.001682653, which indicates that the two variables are inversely correlated
+
+m_1<-t.test(champo_sample_data$QtyRequired,champo_sample_data$AreaFt, data=champo_sample_data, var.equal=FALSE, na.rm=TRUE)
+print(m_1)
+```
+
+```{r}
+#Total Area Mean & SD
+mean(champo_sample_data$QtyRequired, na.rm = TRUE)  #1.974914               
+sd(champo_sample_data$QtyRequired, na.rm = TRUE)    #5.683137
+
+#Area per square ft Mean & SD
+mean(champo_sample_data$AreaFt, na.rm = TRUE)       #21.55581            
+sd(champo_sample_data$AreaFt, na.rm = TRUE)         #21.54228
+```
+
+```{r}
+#PLOTS
+
+PieChart(ITEM_NAME, hole = 0, values = "%", data = champo_sample_data,
+         fill = c("pink","orange","blue","red","purple","brown","lightblue"), main = "")
+#From the above pie chart we can see that the most number of samples sent out to customers is 'HAND TUFTED' -> 42% and the second most is 'DURRY'-> 27%
+
+PieChart(CountryName, hole = 0, values = "%", data = champo_sample_data,
+         fill = c("pink","orange","blue","red","purple","brown","lightblue"), main = "")
+#From this pie chart we can see that the most samples were sent out to INDIA -> 68%, followed by USA -> 25%
+```
+
+```{r}
+#Creating a target variable- Order Conversion for champo_sample_data
+champo_sample_data<-champo_sample_data%>%
+  mutate(Target = as.factor(ifelse(OrderConversion==1,"Yes","No")))
+
+champo_sample_data$OrderConversion <- NULL
+
+#Calculating the proportion of Yes and No
+Yes_data <- champo_sample_data%>%
+  dplyr::filter(Target=="Yes")
+No_data <- champo_sample_data%>%
+  dplyr::filter(Target=="No")
+
+proportion_data <-nrow(Yes_data)/nrow(No_data)
+proportion_data
+```
+
+```{r}
+#Decision Tree
+
+#Partitioning the data into 80% Train and 20% Test data
+set.seed(1236)
+idx <- sample(2,nrow(champo_sample_data), replace = TRUE, prob = c(0.8,0.2))
+train1 <-champo_sample_data[idx==1,]
+test1<- champo_sample_data[idx==2,]
+
+formula<-Target~.
+
+#CART
+mytree<-rpart(formula,data=train1, parms = list(split="gini"),
+              control=rpart.control(minsplit = 15,minbucket =25,cp=-1))
+print(mytree)
+rpart.plot(mytree)
+
+#Error rate of predicted test and training data compared with  true value
+pred_train1 = predict(mytree, data_train=train1, type= "class")
+mean(train1$Target!=pred_train1, na.rm = TRUE)     #0.09059459
+pred_test1 = predict(mytree, data_test=test1, type= "class")
+mean(test1$Target!=pred_test1,na.rm = TRUE)        #0.2953514
+```
+
+```{r}
+#C5
+mytree_c5<-rpart(formula,data=train1, parms = list(split="information gain"),
+                 control=rpart.control(minsplit = 25,minbucket = 35,cp=-1))
+
+print(mytree_c5)
+rpart.plot(mytree_c5)
+
+#Error rate of predicted test and training data compared with are true value
+pred_train1_c5 = predict(mytree_c5, data_train=train1, type= "class")
+mean(train1$Target!=pred_train1_c5, na.rm = TRUE)     #0.09448649
+pred_test1_c5 = predict(mytree_c5, data_test=test1, type= "class")
+mean(test1$Target!=pred_test1_c5,na.rm = TRUE)        #0.2944865
+```
+
+```{r}
+#Accuracy of model before pruning train data
+prop.table(table(train1$Target))
+matrix1 <- table(train1$Target, pred_train1_c5)
+matrix1
+accuracy_Train <- sum(diag(matrix1)) / sum(matrix1)
+accuracy_Train         #0.9055135
+
+#Accuracy of model after pruning 
+control <- rpart.control(minsplit = 10,
+                         minbucket = 5,
+                         maxdepth = 15,
+                         cp = -1)
+accuracy_tune <- function(fit) {
+  pred_train1 <- predict(fit, train1, type = 'class')
+  matrix1 <- table(train1$Target, pred_train1)
+  accuracy_Train <- sum(diag(matrix1)) / sum(matrix1)
+  accuracy_Train
+}
+tune_fit <- rpart(Target~., train1, method = 'class', control = control)
+accuracy_tune(tune_fit)  
+```
+
+```{r}
+#Random Forest:
+
+champo_random_sample<-champo_sample_data
+
+ntree <-100
+RF <- randomForest(Target~., data=champo_random_sample,ntree= 100, mtry=sqrt(ncol(champo_random_sample)-1),proximity =T,importance= T,na.action=na.roughfix)
+print(RF)
+
+importance(RF, type=1)
+importance(RF, type=2)
+varImpPlot(RF)
+```
+
+```{r}
+#To calculate OOB
+RF$err.rate[ntree,1]
+
+
+#Confusion Matrix
+CM<-table(RF$predicted,champo_random_sample$Target,dnn = c("predicted","Actual"))
+CM
+confusionMatrix(RF$predicted,champo_random_sample$Target)
+
+pred<-prediction(RF$votes[,2], champo_random_sample$Target)
+res<- predict(RF,champo_random_sample,type="response")
+head(res)
+head(champo_random_sample$Target)
+
+#Plotting a Gain chart
+perf<- performance(pred,"tpr","rpp")
+plot(perf)
+plot(perf, colorize=TRUE)
+
+#Response chart
+perf<- performance(pred,"ppv","rpp")
+plot(perf)
+plot(perf, colorize=TRUE)
+
+#lift
+perf<- performance(pred,"lift","rpp")
+plot(perf)
+plot(perf, colorize=TRUE)
+
+#ROC Curve
+perf<- performance(pred,"tpr","fpr")
+plot(perf)
+plot(perf, colorize=TRUE)
+
+#auc
+auc_var<- performance(pred,"auc")
+auc_var<-unlist(slot(auc_var,"y.values"))
+auc_var   #auc for unbalanced data is 0.89
+
+#Samples that will be converted to Orders 
+table(champo_random_sample$Target)
+prop.table(table(champo_random_sample$Target))
+```
+
+```{r}
+#Logistic Regression
+
+champo_sample_logistic<-champo_sample_data
+
+#Splitting the dataset
+split_data <- sample.split(champo_sample_logistic, SplitRatio = 0.8)
+split_data
+
+set.seed(1234)
+ind <- sample(2, nrow(champo_sample_logistic), replace = T, prob = c(0.8, 0.2))
+train_logistic_sample <- champo_sample_logistic[ind==1,]
+test_logistic_sample <- champo_sample_logistic[ind==2,]
+logistic_model <- glm(Target~., data = train_logistic_sample, family = 'binomial')
+logistic_model
+options(scipen=999)
+exp(coef(logistic_model))
+
+#Precision-Recall Curve:
+logistic_train<- predict(logistic_model, data=train_logistic_sample,type="response",na.action=na.exclude)
+logistic_test<- predict(logistic_model, data=test_logistic_sample,type="response",na.action=na.exclude)
+P1= logistic_train[train_logistic_sample$Target=="Yes"]
+P2= logistic_train[train_logistic_sample$Target=="No"]
+P<-pr.curve(P1,P2,curve = TRUE)
+P
+plot(P, main="Precision-Recall curve")
+
+
+#Plots
+hist(predict(logistic_model))
+pred_resp <- predict(logistic_model,type="response")
+hist(pred_resp)
+```
+
+```{r}
+#Neural network
+
+champo_sample_net <- champo_sample_data
+
+#Normalizing all numerical variables
+myscale<- function(x)
+{
+  (x - min(x)/max(x) - min(x))
+}
+champo_neural <- champo_sample_net%>%mutate_if(is.numeric, myscale)
+
+summary(champo_neural)
+
+#Partitioning dataset into test and train
+set.seed(1236)
+indexx <- sample(2, nrow(champo_neural), replace = T, prob = c(0.7,0.3))
+train_N <- champo_neural[indexx == 1,]
+test_N <- champo_neural[indexx == 2,]
+```
+
+```{r}
+#Constructing Neural network model using nnet
+nnModel <- nnet(Target~., data = train_N, linout = F, size = 10, decay = 0.1, maxit = 500)
+plotnet(nnModel)
+
+nn.preds <- predict(nnModel, test_N)
+nn.preds.class <- as.factor(predict(nnModel, test_N, type = "class"))
+nn.preds.class
+
+CM <- table(nn.preds.class, test_N$Target)
+CM
+
+error_metric = function(CM)
+{
+  TN = CM[1,1]
+  TP = CM[2,2]
+  FN = CM[1,2]
+  FP = CM[2,1]
+  recall = (TP)/(TP+FN)
+  precision = (TP)/(TP+FP)
+  falsePostiveRate = (FP)/(FP+TN)
+  falseNegativeRate = (FN)/(FN+TP)
+  error = (FP+FN)/(TP+TN+FP+FN)
+  modelPerf <- list("precision" = precision,
+                    "recall" = recall,
+                    "falsepostiverate" = falsePostiveRate,
+                    "falsenegativerate" = falseNegativeRate,
+                    "error" = error)
+  return(modelPerf)
+}
+
+outPutlist <- error_metric(CM)
+
+df <- ldply(outPutlist, data.frame)
+setNames(df, c("", "Values"))
+```
+
+```{r}
+#Balancing the data
+balanced_data<-ovun.sample(Target ~., data = champo_sample_data, method = "over",N = 9000)$data
+summary(balanced_data$Target)
+```
+
+```{r}
+#Decision Tree
+
+#Partitioning the data into 80% Train and 20% Test
+set.seed(1236)
+idx <- sample(2,nrow(balanced_data), replace = TRUE, prob = c(0.5,0.5))
+train_1 <-balanced_data[idx==1,]
+test_1<- balanced_data[idx==2,]
+
+formula<-Target~.
+
+#CART
+mytree_1<-rpart(formula,data=train_1, parms = list(split="gini"),
+                control=rpart.control(minsplit = 15,minbucket =5,cp=-1, maxdepth = 25))
+print(mytree_1)
+
+rpart.plot(mytree_1)
+
+#Error rate of predicted test and training data compared with  true value
+pred_train_1 = predict(mytree_1, data_train=train_1, type= "class")
+mean(train_1$Target!=pred_train_1, na.rm = TRUE)     #0.1070323
+#test(50%)
+pred_test_1 = predict(mytree_1, data_test=test_1, type= "class")
+mean(test_1$Target!=pred_test_1,na.rm = TRUE)        #0.1200796
+```
+
+```{r}
+#C5
+mytree_2<-rpart(formula,data=train_1, parms = list(split="information gain"),
+                control=rpart.control(minsplit = 5,minbucket = 15,cp=-1,maxdepth = 20))
+
+print(mytree_2)
+rpart.plot(mytree_2)
+
+#Error rate of predicted test and training data compared with are true value
+
+pred_train1_2= predict(mytree_2, data_train_1=train_1, type= "class")
+mean(train_1$Target!=pred_train1_2, na.rm = TRUE)     #0.1298098
+
+pred_test1_2 = predict(mytree_2, data_test_1=test_1, type= "class")
+mean(test_1$Target!=pred_test1_2,na.rm = TRUE)        #0.1424149
+
+#We can see that for both split type = Gini and Information Gain, for the balanced data set, the mean error for train and test data is less. Train and Test error have reduced for the balanced data set.
+```
+
+```{r}
+#Accuracy of model before pruning train data
+prop.table(table(train_1$Target))
+matrix_1 <- table(train_1$Target, pred_train_1)
+matrix_1
+accuracy_Train_1 <- sum(diag(matrix_1)) / sum(matrix_1)
+accuracy_Train_1        #0.8929677
+#Accuracy of balanced data set before pruning is 89%
+
+
+#Accuracy of model after pruning 
+control <- rpart.control(minsplit = 15,
+                         minbucket = 5,
+                         maxdepth = 15,
+                         cp = -1)
+accuracy_tune_1 <- function(fit) {
+  pred_train_1 <- predict(fit, train_1, type = 'class')
+  matrix_2 <- table(train_1$Target, pred_train_1)
+  accuracy_Train_1 <- sum(diag(matrix_2)) / sum(matrix_2)
+  accuracy_Train_1
+}
+tune_fit_1 <- rpart(Target~., train_1, method = 'class', control = control)
+accuracy_tune(tune_fit_1) 
+```
+
+```{r}
+#Random Forest
+
+balanced_random<-balanced_data
+ntree_1 <-100
+RF_1<- randomForest(Target~., data=balanced_random,ntree_1= 100, mtry_1=sqrt(ncol(balanced_random)-1),proximity =T,importance= T,na.action=na.roughfix)
+print(RF_1)
+
+importance(RF_1, type=1)
+importance(RF_1, type=2)
+varImpPlot(RF_1)
+```
+
+```{r}
+#To calculate OOB
+RF_1$err.rate[,1]
+RF_1$err.rate[ntree,1]
+
+#Confusion Matrix
+CM_1<-table(RF_1$predicted,balanced_random$Target,dnn = c("predicted","Actual"))
+CM_1
+confusionMatrix(RF_1$predicted,balanced_random$Target)
+pred_1<-prediction(RF_1$votes[,2], balanced_random$Target)
+
+table(balanced_random$Target)
+prop.table(table(balanced_random$Target))
+
+#Plotting a Gain chart
+perf_1<- performance(pred_1,"tpr","rpp")
+plot(perf_1)
+plot(perf_1, colorize=TRUE)
+
+#Response chart
+perf_1<- performance(pred_1,"ppv","rpp")
+plot(perf_1)
+plot(perf_1, colorize=TRUE)
+
+#lift
+perf_2<- performance(pred_1,"lift","rpp")
+plot(perf_2)
+plot(perf_2, colorize=TRUE)
+
+#ROC Curve
+perf_3<- performance(pred_1,"tpr","fpr")
+plot(perf_1)
+plot(perf_1, colorize=TRUE)
+
+#auc
+auc_var1<- performance(pred_1,"auc")
+auc_var1<-unlist(slot(auc_var1,"y.values"))
+auc_var1   #auc for balanced data set is 0.91, which is closer to 1
+```
+
+```{r}
+#Logistic Regression
+
+balanced_logit<-champo_sample_data
+
+#Splitting the data set
+split_data_1 <- sample.split(balanced_logit, SplitRatio = 0.8)
+split_data_1
+
+set.seed(1234)
+ind_1 <- sample(2, nrow(balanced_logit), replace = T, prob = c(0.8, 0.2))
+train_logistic_sample_1 <- balanced_logit[ind_1==1,]
+test_logistic_sample_1 <- balanced_logit[ind_1==2,]
+logistic_model_1 <- glm(Target~., data = train_logistic_sample_1, family = 'binomial')
+logistic_model_1
+options(scipen=999)
+exp(coef(logistic_model_1))
+```
+
+```{r}
+#Precision-Recall Curve:
+logistic_train_1<- predict(logistic_model_1, data=train_logistic_sample_1,type="response",na.action=na.exclude)
+logistic_test_1<- predict(logistic_model_1, data=test_logistic_sample_1,type="response",na.action=na.exclude)
+P_1= logistic_train_1[train_logistic_sample_1$Target=="Yes"]
+P_2= logistic_train_1[train_logistic_sample_1$Target=="No"]
+P_1<-pr.curve(P_1,P_2,curve = TRUE)
+P_1
+plot(P_1, main="Precision-Recall curve")
+```
+
+```{r}
+#PLOTS
+
+hist(predict(logistic_model_1))
+pred_resp_1 <- predict(logistic_model_1,type="response")
+hist(pred_resp_1)
+```
+
+```{r}
+#Neural network
+
+balanced_net <- balanced_data
+
+#Normalizing all numerical variables
+myscale_1<- function(x)
+{
+  (x - min(x)/max(x) - min(x))
+}
+bal_net <- balanced_net %>% mutate_if(is.numeric, myscale_1)
+
+summary(bal_net)
+
+#Partitioning dataset into test and train sets
+set.seed(1236)
+indexx_1 <- sample(2, nrow(bal_net), replace = T, prob = c(0.7,0.3))
+train_B <- bal_net[indexx_1 == 1,]
+test_B <- bal_net[indexx_1 == 2,]
+```
+
+```{r}
+#Constructing Neural network model using nnet
+
+nnModel_1 <- nnet(Target~., data = train_B, linout = F, size = 10, decay = 0.2, maxit = 400)
+plotnet(nnModel_1)
+
+nn.preds_1 <- predict(nnModel_1, test_B)
+nn.preds.class_1 <- as.factor(predict(nnModel_1, test_B, type = "class"))
+nn.preds.class_1
+
+CM_1 <- table(nn.preds.class_1, test_B$Target)
+
+
+error_metric_1 = function(CM_1)
+{
+  TN = CM_1[1,1]
+  TP = CM_1[2,2]
+  FN = CM_1[1,2]
+  FP = CM_1[2,1]
+  recall = (TP)/(TP+FN)
+  precision = (TP)/(TP+FP)
+  falsePostiveRate = (FP)/(FP+TN)
+  falseNegativeRate = (FN)/(FN+TP)
+  error = (FP+FN)/(TP+TN+FP+FN)
+  modelPerf_1 <- list("precision" = precision,
+                      "recall" = recall,
+                      "falsepostiverate" = falsePostiveRate,
+                      "falsenegativerate" = falseNegativeRate,
+                      "error" = error)
+  return(modelPerf_1)
+}
+
+outPutlist_1 <- error_metric_1(CM_1)
+
+df1 <- ldply(outPutlist_1, data.frame)
+setNames(df1, c("", "Values"))
+```
+
+```{r}
+#K-means Clustering
+
+kmeans_data <- read_excel("Champo_Carpets.xlsx",sheet=6)
+
+#EDA
+
+#Checking for null values
+cbind(
+  lapply(
+    lapply(kmeans_data, is.na)
+    , sum)
+)
+```
+
+```{r}
+#Finding out OUTLIERS
+names(kmeans_data)[2]<-'Sum_of_QtyRequired'
+boxplot(kmeans_data$Sum_of_QtyRequired)
+boxplot(kmeans_data$Sum_of_QtyRequired,plot = FALSE)$out
+
+names(kmeans_data)[3]<-'Sum_of_TotalArea'
+boxplot(kmeans_data$Sum_of_TotalArea)
+boxplot(kmeans_data$Sum_of_TotalArea,plot = FALSE)$out
+
+names(kmeans_data)[4]<-'Sum_of_Amount'
+boxplot(kmeans_data$Sum_of_Amount)
+boxplot(kmeans_data$Sum_of_Amount,plot = FALSE)$out
+```
+
+```{r}
+#Correlation between the numeric variables
+
+#Correlation between Sum of Quantity Required and Sum of Amount
+col_a<-kmeans_data[,2]
+col_b<-kmeans_data[,4]
+cor(col_a,col_b)
+#Correlation between Sum of Quantity Required and Sum of Amount is 0.3766587, which indicates that the that the linear relationship is weak
+m1<-t.test(kmeans_data$Sum_of_QtyRequired,kmeans_data$Sum_of_Amount, data=kmeans_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+
+#Correlation between Sum of Quantity Required Sum of Total Area
+col_c<-kmeans_data[,2]
+col_d<-kmeans_data[,3]
+cor(col_c,col_d)
+#Correlation between Sum of Quantity Required Sum of Total Area is 0.139985, which indicates that the linear relationship is weak
+m1<-t.test(kmeans_data$Sum_of_QtyRequired,kmeans_data$Sum_of_TotalArea, data=kmeans_data, var.equal=FALSE, na.rm=TRUE)
+print(m1)
+```
+
+```{r}
+#Sum of Total Area Mean & SD
+mean(kmeans_data$Sum_of_TotalArea, na.rm = TRUE)     #13056.59               
+sd(kmeans_data$Sum_of_TotalArea, na.rm = TRUE)       #34474.18
+
+#Sum of Amount Mean & SD
+mean(kmeans_data$Sum_of_Amount, na.rm = TRUE)        #698209.9           
+sd(kmeans_data$Sum_of_Amount, na.rm = TRUE)          #1808977
+
+#Sum of Quantity required Mean & SD
+mean(kmeans_data$Sum_of_QtyRequired, na.rm = TRUE)   #12977.56            
+sd(kmeans_data$Sum_of_QtyRequired, na.rm = TRUE)     #30550.74
+```
+
+```{r}
+r1<- kmeans_data$`Row Labels`
+rownames(kmeans_data)<-r1
+kmeans_data<-kmeans_data[,-1]
+rownames(kmeans_data)<-r1
+
+myscale_2 <- function(x2)
+{
+  (x2 - min(x2)) / (max(x2)-min(x2))
+}
+
+df_2 <- kmeans_data %>% mutate_if(is.numeric, myscale_2)
+kmModel <- kmeans(df_2, centers = 6,nstart = 100)
+str(kmModel)
+kmModel
+kmModel$cluster
+kmModel$size
+
+p6<- fviz_cluster(kmModel,data = df_2, geom = "point") + ggtitle("K = 6")
+```
+
+```{r}
+#Elbow graph
+
+kmModel_4<- kmeans(df_2, centers = 4,nstart = 100)
+kmModel_5<- kmeans(df_2, centers = 5,nstart = 100)
+kmModel_7<- kmeans(df_2, centers = 7,nstart = 100)
+
+p6 <- fviz_cluster(kmModel,data = df_2, geom = "point") + ggtitle("K = 6")
+p4 <- fviz_cluster(kmModel_4,data = df_2, geom = "point") + ggtitle("K = 4")
+p5 <- fviz_cluster(kmModel_5,data = df_2, geom = "point") + ggtitle("k = 5")
+p7 <- fviz_cluster(kmModel_7,data = df_2, geom = "point") + ggtitle("K = 7")
+
+grid.arrange(p6,p4,p5,p7, nrow=2)
+
+
+fviz_nbclust(df_2, kmeans, method ="wss")
+#From the above elbow graph, we can see that for k = 6 is the optimal number of clusters
+
+fviz_cluster(kmModel, data = df_2) +ggtitle("For K=6")
+```
+
+```{r}
+#Silhouette measure
+
+myscale_3 <- function(x3)
+{
+  (x3 - min(x3)) / (max(x3)-min(x3))
+}
+
+df_s <- kmeans_data %>% mutate_if(is.numeric, myscale_3)
+
+avg_sil <- function(k)
+{
+  kmModel <- kmeans(df_s, centers = k, nstart = 100)
+  s <- silhouette(kmModel$cluster, dist(df_s))
+  mean(s[,3])
+}
+
+avg_sil(6)
+avg_sil(2)
+avg_sil(4)
+#We can see that the average silhouette for k = 6 is 59% and (between_SS / total_SS) = 74.2%. Hence, we choose k = 6 for our clustering method
+
+fviz_nbclust(df_s,kmeans, method = "silhouette")
+
+#To evaluate the goodness of our clustering
+#Si > 0 means that the observation is well clustered.The closest it is to 1, the best it is clustered.
+clustering <- kmeans(df_s, centers = 5, nstart = 100)
+sil <- silhouette(clustering$cluster, dist(df_s))
+fviz_silhouette(sil)
+```
+
+```{r}
+#Hierarchical clustering
+
+hire_data <- read_excel("Champo_Carpets.xlsx",sheet=6)
+
+
+rname<- hire_data$`Row Labels`
+rownames(hire_data)<-rname
+hire_data<-hire_data[,-1]
+rownames(hire_data)<-rname
+
+myscale_h <- function(x4)
+{
+  (x4 - min(x4)) / (max(x4)-min(x4))
+}
+
+df_h <- hire_data %>%
+  mutate_if(is.numeric, myscale_h)
+
+distance <- dist(df_h, method = "euclidean")
+hcomp <- hclust(distance, method = "complete") 
+plot(hcomp, cex = 0.6, hang = -2, main = "Dendogram for Hclust")
+clusters <- cutree(hcomp, k = 5)
+clusters
+```
+
+```{r}
+#Alternatively, using the agnes function
+
+h_agnes <- agnes(df_h, method = "complete")
+pltree(h_agnes, cex = 0.6, hang = -2)
+clusters2 <- cutree(as.hclust(h_agnes), k = 5)
+clusters2
+
+table(clusters2)
+table(clusters)
+
+h_agnes$ac
+#Agglomerative coefficient is 0.87, which is closer to 1 suggesting a Strong clustering
+
+m <- c("average","single","complete","ward")
+names(m) <- c("average","single","complete","ward")
+
+#Function to compute coefficient
+ac <- function(x_h)
+{
+  agnes(df_h, method = x_h)$ac
+}
+
+map_dbl(m, ac)
+
+#Agnes for ward
+h_agnes_1 <- agnes(df_h, method = "ward")
+pltree(h_agnes_1, cex = 0.6, hang = -2,main = "Dendrogram of agnes")
+clusters3 <- cutree(as.hclust(h_agnes_1), k = 5 )
+clusters3
+
+fviz_nbclust(df_h, FUN = hcut, method = "silhouette")
+gap_stat <- clusGap(df_h, FUN = hcut, nstart = 50, K.max = 10, B = 100)
+fviz_gap_stat(gap_stat)
+
+```
+
+```{r}
+#Divisive Hierarchical Clustering
+
+#Compute divisive hierarchical clustering
+hire_cluster <- diana(df_h)
+
+#Divisive coefficient; amount of clustering structure found
+hire_cluster$dc
+## [1] 0.8631282
+
+#Plotting dendrogram
+pltree(hire_cluster, cex = 0.6, hang = -1, main = "Dendrogram of diana")
+
+#Ward's method
+hc_1 <- hclust(distance, method = "ward.D2" )
+
+#Cut tree into 4 groups
+sub_grp <- cutree(hc_1, k = 6)
+
+#Number of members in each cluster
+table(sub_grp)
+
+
+hire_data %>%
+  mutate(cluster = sub_grp) %>%
+  head
+
+plot(hc_1, cex = 0.6)
+rect.hclust(hc_1, k = 6, border = 1:6)
+
+fviz_cluster(list(data = df_h, cluster = sub_grp))
+
+#Compute distance matrix
+dist_1 <- dist(df_h, method = "euclidean")
+
+#Compute 2 hierarchical clusterings
+hc1 <- hclust(dist_1, method = "complete")
+hc2 <- hclust(dist_1, method = "ward.D2")
+
+#Create two dendrograms
+dend1 <- as.dendrogram (hc1)
+dend2 <- as.dendrogram (hc2)
+
+tanglegram(dend1, dend2)
+```
+
+```{r}
+#Recommender system
+rec<- read_excel("Champo_Carpets.xlsx",sheet=5)
+names(rec)[1]<-'Customer'
+names(rec)[2]<-'Hand_Tufted'
+names(rec)[3]<-'Double_Wowen'
+names(rec)[5]<-'Double_Back'
+names(rec)[18]<-'Blush_Pink'
+rec$NAVY <- NULL
+
+#Fetching subset of main data set
+rec1 <- subset(rec, select= c('Customer','Hand_Tufted','Double_Wowen','Durry','Double_Back','Knotted','Jacquared','Handloom','Other','Rectangle','Square','Round','Purple','Gray','Navy','PINK','BLUE','Blush_Pink','NEUTRAL','TAN'))
+dim(rec1)
+
+rec2<-as(rec1, "transactions")
+
+if (!require("RColorBrewer")) {
+  # install color package of R
+  install.packages("RColorBrewer")
+  #include library RColorBrewer
+  library(RColorBrewer)
+}
+
+dev.off()
+itemFrequencyPlot(rec2, topN=10, type="absolute",main="Item Frequency")
+
+
+frequentItems <- eclat(rec2,
+                       parameter = list(supp=0.2, maxlen=4))
+```
+
+```{r}
+#Using Apriori() function to generate association rules
+rules <- apriori (rec2,
+                  parameter = list(supp=0.5, conf= 0.5))
+
+#Sorting the rules by Confidence
+rules_confidence <- sort (rules, by="confidence", decreasing=TRUE)
+inspect(rules_confidence[1:10])
+
+#Support, lift and confidence for all the rules
+rules_lift <- sort (rules, by="lift", decreasing=TRUE)
+inspect(rules_lift[1:10])
+
+
+rules_confidence <- rules[!is.redundant(rules_confidence)]
+inspect(head(rules))
+```
+
+```{r}
+#Rules that lead to buying 'Double_Back'
+rules<- apriori (data=rec2,
+                 parameter=list(supp=0.5, conf=0.2),
+                 appearance= list(default="lhs",rhs="Double_Back=[0,249)"),
+                 control = list(verbose=F))
+
+
+#High-Confidence rules
+rules_confidence <- sort (rules, by="confidence", decreasing=TRUE)
+inspect(head(rules_confidence))
+
+
+#Those who bought 'Double_Back' also bought
+rules <- apriori (data=rec2, parameter=list (supp=0.5,conf = 0.15,minlen=5))
+rules_confidence <- sort (rules, by="confidence", decreasing=TRUE)
+inspect(head(rules_confidence))
+
+
+#Rules that lead to buying 'Knotted'
+rules_k <- apriori (data=rec2,
+                    parameter=list(supp=0.5, conf=0.2),
+                    appearance= list(default="lhs",rhs="Knotted=[0,252)"),
+                    control = list(verbose=F))
+
+
+#High-Confidence rules
+rules_confidence_k <- sort (rules_k, by="confidence", decreasing=TRUE)
+inspect(head(rules_confidence_k))
+
+
+#Those who bought 'Knotted' also bought
+rules_k <- apriori (data=rec2, parameter=list (supp=0.5,conf = 0.15,minlen=5))
+rules_confidence_k <- sort (rules_k, by="confidence", decreasing=TRUE)
+inspect(head(rules_confidence_k))
+
+plot(rules, method = "graph", control = list(type = 'item'), interactive = T)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
